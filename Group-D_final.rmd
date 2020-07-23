@@ -1,0 +1,284 @@
+---
+title: "Research Seminar"
+author: "Quinnie_Nguyen"
+date: "06/23/2020"
+---
+
+````{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r}
+setwd("D:/InnoSeminar")
+EPO_Inv_reg <- fread("REGPAT_201803/201803_EPO_Inv_reg.txt", encoding = "UTF-8")
+EPO_IPC <- fread("REGPAT_201803/201803_EPO_IPC.txt", encoding = "UTF-8")
+REGPAT_Regions_NUTS3_TL3 <- fread("REGPAT_201803/REGPAT_Regions_NUTS3_TL3.txt", encoding = "UTF-8")
+QUALITY_EPO <- fread('Indicators_201803/201803_OECD_PATENT_QUALITY_EPO.txt', encoding = "UTF-8")
+
+```
+###Modify data
+```{r}
+thu_up_reg<- unique(REGPAT_Regions_NUTS3_TL3[grep("THÜRINGEN", REGPAT_Regions_NUTS3_TL3$Up_reg_label),])
+thu_inv<- EPO_Inv_reg[EPO_Inv_reg$Reg_code %in% thu_up_reg$Reg_Code,]
+EPO_IPC$ipc3 <- substr(EPO_IPC$IPC, 1,3)
+thu_data_de <- inner_join(thu_inv, thu_up_reg, by = c("Reg_code" = "Reg_Code"))
+thu_data_de <- thu_data_de %>%mutate(Thuringia = case_when(thu_data_de$Up_reg_label =="OSTTHÜRINGEN"~"EAST", thu_data_de$Up_reg_label=="MITTELTHÜRINGEN"~"CENTRAL", thu_data_de$Up_reg_label=="SÜDTHÜRINGEN"~"SOUTH", TRUE~"NORTH"))
+thu_ipc <- EPO_IPC[EPO_IPC$Appln_id %in% thu_inv$Appln_id,]
+thu_ipc_7716 <- copy(thu_ipc)
+thu_ipc<-thu_ipc%>%mutate(Prio_Year = case_when(thu_ipc$Prio_Year %in%1991:1995~1, thu_ipc$Prio_Year %in%1996:2000~2, thu_ipc$Prio_Year %in%2001:2005~3, thu_ipc$Prio_Year %in%2006:2010~4))
+thu_ipc3<- inner_join(thu_ipc, unique(thu_data_de[ , c("Appln_id", "Reg_code", "Thuringia")]), by = c("Appln_id" = "Appln_id"))
+thu_data<- inner_join(thu_data_de, unique(thu_ipc[, c("Appln_id", "Prio_Year", "App_year")]),by = c("Appln_id" = "Appln_id"))
+thu_open <- thu_data[thu_data$Inv_share < 1,]
+thu_open <- unique(thu_open[, c("Appln_id", "Person_id", "Reg_share", "Inv_share")])
+open_close <- aggregate(thu_open[,c("Inv_share")], by = list(thu_open$Appln_id), sum)
+names(open_close) <- c("Appln_id", "Total_invshare")
+open_close$open_or_close <- ifelse(open_close$Total_invshare < 1, 1, 0) # 1 for having external knowledge sources
+thu_data <- merge(thu_data, open_close, by="Appln_id", all.x = TRUE)
+thu_data[thu_data$Inv_share == 1, c("Total_invshare")] <- 1
+thu_data[thu_data$Inv_share == 1, c("open_or_close")] <- 0
+thu_central <- filter(thu_data, Thuringia %in% "CENTRAL" & Prio_Year %in% 1:4)
+thu_east <- filter(thu_data, Thuringia %in% "EAST" & Prio_Year %in% 1:4)
+thu_south <- filter(thu_data, Thuringia %in% "SOUTH" & Prio_Year %in% 1:4)
+thu_north <- filter(thu_data, Thuringia %in% "NORTH" & Prio_Year %in% 1:4)
+```
+
+I.General view of Thuringia patents activities
+
+1. Number of patents by sub-regions 1990-2010
+```{r}
+thu_data_7716 <- left_join(thu_data_de, 
+                      unique(thu_ipc_7716[ , c("Appln_id", "Prio_Year", "App_year")]), 
+                      by = c("Appln_id" = "Appln_id"))
+thu_data_7716 <- thu_data_7716[thu_data_7716$Prio_Year < 2011,]
+thu_data_7716 <- unique(thu_data_7716[,c("Appln_id", "Thuringia", "Prio_Year")])
+thu_data_7716 <- aggregate(thu_data_7716[,c("Appln_id")], by= list(thu_data_7716$Prio_Year, thu_data_7716$Thuringia), length)
+names(thu_data_7716) <- c("Prio_Year", "Thuringia", "Number_of_patents")
+ggplot(thu_data_7716, aes(x= Prio_Year, y= Number_of_patents)) + 
+  geom_line(aes(color = Thuringia), size = 1.2) +  
+  theme_bw()+
+  ggtitle("Number of patents registered by sub-regions in Thuringia (1977-2010)")
+```
+
+
+2. IPC3 class of patents by sub-regions
+
+```{r}
+thu_ipc_7716_reg <- inner_join(thu_ipc_7716, unique(thu_data_de[ , c("Appln_id", "Reg_code", "Thuringia")]), by = c("Appln_id" = "Appln_id"))
+thu_ipc3_unique=unique(thu_ipc_7716_reg[thu_ipc_7716_reg$Prio_Year < 2011,c("Appln_id","ipc3","Prio_Year","Thuringia")])
+total_reg_ipc <- aggregate(thu_ipc3_unique$Appln_id, list(thu_ipc3_unique$Thuringia,thu_ipc3_unique$ipc3), length)
+names(total_reg_ipc)<-c("Thuringia","ipc3","total")
+ipc3_north=subset(total_reg_ipc,Thuringia=="NORTH")
+ipc3_south=subset(total_reg_ipc,Thuringia=="SOUTH")
+ipc3_east=subset(total_reg_ipc,Thuringia=="EAST")
+ipc3_central=subset(total_reg_ipc,Thuringia=="CENTRAL")
+central_ipc3=head(ipc3_central[order(ipc3_central$total, decreasing = T),],5)
+north_ipc3=head(ipc3_north[order(ipc3_north$`total`,decreasing=T),],5)
+east_ipc3=head(ipc3_east[order(ipc3_east$`total`,decreasing=T),],5)
+south_ipc3=head(ipc3_south[order(ipc3_south$total,decreasing=T),],5)
+top_5<- cbind(central_ipc3, east_ipc3, south_ipc3, north_ipc3)
+```
+
+
+
+II.Technological Capability
+
+
+ 
+```{r}
+#define a funtion to measure the technological capability of a region over time
+#input: patent data of this region, quality of patent dataframe
+descriptive_stats <- function(pat, quality) {
+  region <- quality[quality$appln_id %in% pat$Appln_id, c("appln_id","patent_scope","fwd_cits7")]
+  names(region) <- c("Appln_id", "Patent_Scope", "Forward_Citations")
+  region <- merge(pat, region, by = "Appln_id", all = TRUE )
+  region <- unique(region[,c("Appln_id","Prio_Year", "Patent_Scope", "Forward_Citations", "open_or_close")])
+  region$Count <- 1
+  
+  region_pat <- aggregate(region[,c("Patent_Scope", "Forward_Citations", "Count", "open_or_close")], by=list(region$Prio_Year), sum)
+  region_pat$AVG_Scope <- round(region_pat$Patent_Scope/region_pat$Count,4)
+  region_pat$AVG_FWDCITS <- round(region_pat$Forward_Citations/region_pat$Count, 4)
+  names(region_pat)[1] <- c("Period")
+  region_pat$Period<- c("1991-1995","1996-2000","2001-2005","2006-2010")
+  region_pat$percent_open <- round(region_pat$open_or_close*100/region_pat$Count, 4)
+  return(region_pat)
+}
+central_pat <- descriptive_stats(thu_central, QUALITY_EPO)
+east_pat <- descriptive_stats(thu_east, QUALITY_EPO)
+north_pat <- descriptive_stats(thu_north, QUALITY_EPO)
+south_pat <- descriptive_stats(thu_south, QUALITY_EPO)
+```
+
+1. Number of Patents by sub-regions
+```{r}
+no_pat <- data.frame(matrix(ncol = 0, nrow = 4))
+no_pat$Period <- central_pat$Period
+no_pat$Central <- central_pat$Count
+no_pat$East <- east_pat$Count
+no_pat$South <- south_pat$Count
+no_pat$North <- north_pat$Count
+no_pat_melt <- melt(as.data.table(no_pat), variable.name ="Region", value.name = "Number_of_patents")
+
+ggplot(no_pat_melt, aes(Period, Number_of_patents, fill = Region)) + 
+  geom_bar(stat="identity", position = position_dodge()) +  
+  theme_bw()+
+  ggtitle("Total number of registered patents by sub-regions in Thuringia (1991-2010)")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+2. Average Scope of paten by sub-regions
+```{r}
+avg_scope <- data.frame(matrix(ncol=0, nrow = 4))
+avg_scope$Period <- central_pat$Period
+avg_scope$Central <- central_pat$AVG_Scope
+avg_scope$East <- east_pat$AVG_Scope
+avg_scope$South <- south_pat$AVG_Scope
+avg_scope$North <- north_pat$AVG_Scope
+avg_scope_melt <- melt(as.data.table(avg_scope), variable.name ="Region", value.name = "Average_Scope")
+
+ggplot(avg_scope_melt, aes(Period, Average_Scope, fill = Region)) + 
+  geom_bar(stat="identity", position = position_dodge()) +  
+  theme_bw() +
+  ggtitle("Average Scope of Patent Activities by sub-regions in Thuringia (1991-2010)")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+3. Average Forward Citation of patents by sub-regions
+
+```{r}
+avg_fwdcits <- data.frame(matrix(ncol=0, nrow = 4))
+avg_fwdcits$Period <- central_pat$Period
+avg_fwdcits$Central <- central_pat$AVG_FWDCITS
+avg_fwdcits$East <- east_pat$AVG_FWDCITS
+avg_fwdcits$South <- south_pat$AVG_FWDCITS
+avg_fwdcits$North <- north_pat$AVG_FWDCITS
+avg_fwdcits_melt <- melt(as.data.table(avg_fwdcits), variable.name ="Region", value.name = "Average_Forward_Citations")
+
+ggplot(avg_fwdcits_melt, aes(Period, Average_Forward_Citations, fill = Region)) + 
+  geom_bar(stat="identity", position = position_dodge()) +  
+  theme_bw() +
+  ggtitle("Average Citations Received by Patents Registered by sub-regions \nin Thuringia (1991-2010)")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+4 Openness to External Knowledge 
+```{r}
+percentage_open <- data.frame(matrix(ncol = 0, nrow = 4))
+percentage_open$Period <- central_pat$Period
+percentage_open$Central <- central_pat$percent_open
+percentage_open$East <- east_pat$percent_open
+percentage_open$South <- south_pat$percent_open
+percentage_open$North <- north_pat$percent_open
+percentage_open_melt <- melt(as.data.table(percentage_open), variable.name = "Region", value.name = "Openness_to_External_Knowldge")
+
+ggplot(percentage_open_melt, aes(Period, Openness_to_External_Knowldge, fill= Region)) +
+  geom_bar(stat="identity", position = position_dodge()) +  
+  theme_bw() +
+  ggtitle("Percentage of Patents Registered by sub-regions in Thuringia \nabsorbing External Knowledge (1991-2010)")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+II. Technological Proximity
+
+ 
+```{r}
+sub_region <- c("CENTRAL", "EAST", "SOUTH", "NORTH")
+for (region in sub_region){
+  assign(paste(region, "_ipc", sep =""), unique(filter(thu_ipc3, Thuringia %in% region & Prio_Year %in% 1:4)[,c("Appln_id", "Prio_Year", "ipc3")]))
+}
+IPC_share_def <- function(IPC_df, names_list = c("IPC3", "c1","c2","c3", "c4")){
+  ###IPC3_share in every period
+      IPC3_share <- aggregate(IPC_df$Appln_id, by=list(IPC_df$Prio_Year, IPC_df$ipc3), length)      
+      total_ipc <- aggregate(IPC3_share$x, by=list(IPC3_share$Group.1), sum)
+      IPC3_share <- merge(IPC3_share,total_ipc, all=T, by="Group.1") 
+      IPC3_share$share <- IPC3_share$x.x/IPC3_share$x.y
+      names(IPC3_share) <- names_list
+  return(IPC3_share)
+}
+IPC3_share_central <- IPC_share_def(CENTRAL_ipc, c("Period", "IPC3", "n_cipc3", "total_cipc3", "cipc3_share"))
+IPC3_share_east <- IPC_share_def(EAST_ipc, c("Period", "IPC3", "n_eipc3", "total_eipc3", "eipc3_share"))
+IPC3_share_south <- IPC_share_def(SOUTH_ipc, c("Period", "IPC3", "n_sipc3", "total_sipc3", "sipc3_share"))
+IPC3_share_north <- IPC_share_def(NORTH_ipc, c("Period", "IPC3", "n_nipc3", "total_nipc3", "nipc3_share"))
+#IPC3 share for each time period
+for (i in 1:4){
+  assign(paste("IPC3_", i, sep=""), Reduce(function(x, y) merge(x, y, all=TRUE), list(IPC3_share_central[IPC3_share_central$Period==i , c(2,5)], IPC3_share_east[IPC3_share_east$Period==i,c(2,5)], IPC3_share_south[IPC3_share_south$Period==i,c(2,5)], IPC3_share_north[IPC3_share_north$Period==i,c(2,5)])))
+}
+```
+
+
+```{r}
+tech_distance_def <- function(IPC3_df){
+    IPC3_df[is.na(IPC3_df)] <- 0
+    names(IPC3_df) <- c("IPC3", "Central", "East", "South", "North")
+    IPC3_df$Diff_CE <- (IPC3_df$Central -IPC3_df$East)**2
+    IPC3_df$Diff_CS <- (IPC3_df$Central -IPC3_df$South)**2
+    IPC3_df$Diff_CN <- (IPC3_df$Central -IPC3_df$North)**2
+    IPC3_df$Diff_ES <- (IPC3_df$East -IPC3_df$South)**2
+    IPC3_df$Diff_EN <- (IPC3_df$East -IPC3_df$North)**2
+    IPC3_df$Diff_SN <- (IPC3_df$South -IPC3_df$North)**2
+    CE <- round(sqrt(sum(IPC3_df$Diff_CE)),3)
+    CS <- round(sqrt(sum(IPC3_df$Diff_CS)),3)
+    CN <- round(sqrt(sum(IPC3_df$Diff_CN)),3)
+    ES <- round(sqrt(sum(IPC3_df$Diff_ES)),3)
+    EN <- round(sqrt(sum(IPC3_df$Diff_EN)),3)
+    SN <- round(sqrt(sum(IPC3_df$Diff_SN)),3)
+    return(c(CE, CS, CN, ES, EN, SN))
+}
+dis1 <- tech_distance_def(IPC3_1)
+dis2 <- tech_distance_def(IPC3_2)
+dis3 <- tech_distance_def(IPC3_3)
+dis4 <- tech_distance_def(IPC3_4)
+tech_proxi <- as.data.frame(rbind(dis1, dis2, dis3, dis4))
+names(tech_proxi) <- c("Central_East","Central_South", "Central_North", "East_South", "East_North", "South_North")
+tech_proxi$Period <- c(1,2,3,4)
+#rownames(tech_proxi) <- 1:4
+#distance bwt Central with others
+central <- tech_proxi[,c("Period", "Central_East","Central_South", "Central_North")]
+central <- melt(as.data.table(central), id.vars = 1, variable.name = "Regions", value.name = "Technological_Distance")
+east <- tech_proxi[,c("Period", "Central_East", "East_South", "East_North")]
+east <- melt(as.data.table(east), id.vars = 1, variable.name = "Regions", value.name ="Technological_Distance")
+south <- tech_proxi[,c("Period", "Central_South", "East_South", "South_North")]
+south <- melt(as.data.table(south), id.vars = 1, variable.name = "Regions", value.name ="Technological_Distance")
+north <- tech_proxi[,c("Period", "Central_North", "East_North", "South_North")]
+north <- melt(as.data.table(north), id.vars = 1, variable.name = "Regions", value.name ="Technological_Distance")
+tech_pro <- melt(as.data.table(tech_proxi), id.vars = 7, variable.name = "Regions", value.name ="Technological_Distance")
+tech_proxi
+ggplot(tech_pro, aes(x= Period, y= Technological_Distance)) + 
+  geom_line(aes(color = Regions), size = 1.2) +  
+  theme_bw()+
+  ggtitle("Technological Distance between sub-regions in Thuringia (1991-2010)")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
